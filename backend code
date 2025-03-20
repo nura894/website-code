@@ -1,0 +1,116 @@
+from flask import Flask, request, jsonify, render_template
+from pymongo import MongoClient
+from bson import ObjectId 
+
+app= Flask(__name__)
+
+
+@app.route('/')
+def home():
+    return render_template('index.html')
+
+@app.route('/add_record')
+def add_record_page():
+    return render_template('add_record.html')
+
+
+
+client = MongoClient('mongodb://localhost:27017/')
+db= client['crime_records']
+collection= db['All_Records']
+
+def convert_id(record): #record is every document , inside it all parameter is present
+     record['_id']=str(record['_id'])
+     return record
+     
+
+def convert_num(data):
+     for key,value in data.items():
+          if key =="_id" and ObjectId.is_valid(value):
+               data[key]= ObjectId(value)
+
+
+          elif isinstance(value,str) and value.isdigit():
+               data[key]=int(value)
+     return data             
+
+#GET method in API
+# To retrive all the records
+
+@app.route('/api/record', methods= ['GET'])
+def get_record():
+     reco= request.args.to_dict()
+
+     reco=convert_num(reco)
+
+     if reco:       #if filters are provided 
+          crime_records= list(collection.find(reco))   
+          if crime_records:
+               return jsonify([convert_id(r) for r in crime_records]), 200
+          return jsonify({'error': 'No matching records found'}), 404
+     else:   #if no filter is provided 
+          crime_records= list(collection.find())  
+          return jsonify([convert_id(r) for r in crime_records]), 200
+     
+
+#POST --  Add new record
+
+@app.route('/api/record', methods= ['POST'])
+def add_record():
+     data= request.json
+
+     if not data:
+          return jsonify({'error': 'body cannot be empty'}), 400
+
+     if isinstance(data, list):
+          collection.insert_many(data)
+     else:
+          collection.insert_one(data)     
+
+     return jsonify({'message': 'Record(s) added successfully'}), 201
+
+
+#PUT -- to update records based on any parameter
+
+@app.route('/api/record', methods= ['PUT'])
+
+def update_record():
+     rec= request.args.to_dict()
+     rec= convert_num(rec)
+
+     update_data= request.json
+     
+     if not update_data:
+          return jsonify({'error': 'Please provide data to update'}), 400
+
+
+     result= collection.update_many(rec, {"$set": update_data}) #update matching records in database
+
+     if result.modified_count>0:
+          return jsonify({'message':f'{result.modified_count} record(s) updated successfully'}), 200
+     return jsonify({'error': 'No matching record found'}), 404
+
+
+#DELETE -- To remove record based on any parameter
+
+@app.route('/api/record', methods= ['DELETE'])
+
+def delete_record():
+
+     rec= request.args.to_dict()    #stores argument in dictionary form
+     rec= convert_num(rec)
+     if not rec:
+          return jsonify({'error': 'Please provide at least one filter parameter'}), 400
+     
+
+     result = collection.delete_many(rec)   #deletes matching records 
+
+     if result.deleted_count>0:
+          return jsonify({'message':f'{result.deleted_count} record(s) deleted successfully'}), 200
+     return jsonify({'error': 'No matching record found'}), 404
+
+
+if __name__== '__main__':
+     app.run(debug=True)
+     
+
